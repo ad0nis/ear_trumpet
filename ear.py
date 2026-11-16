@@ -1,6 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import socketserver
 import threading
+import time
 # Credit for much of this code goes to the following:
 # https://stackoverflow.com/questions/35279655/connecting-to-multiple-ports-using-python-socketserver
 
@@ -10,38 +11,46 @@ class Ear(socketserver.BaseRequestHandler):
         self.data = self.request.recv(2048)
 
         if self.data:
-            if "ping" in repr(self.data.strip()):
-                print("%s reached us on port %i." % ( self.client_address[0], self.request.getsockname()[1]))
-                self.request.sendall(b'pong %i\n' %(self.request.getsockname()[1]))
+            port = self.request.getsockname()[1]
+            if b"ping" in self.data:
+                print("%s reached us on port %i." % (self.client_address[0], port))
+                self.request.sendall(("pong %i\n" % port).encode())
             else:
-                print("Received: '%s' from '%s:%i' on port '%i'." % (repr(self.data), self.client_address[0], self.client_address[1], self.request.getsockname()[1]))
+                print("Received: '%s' from '%s:%i' on port '%i'." % (repr(self.data), self.client_address[0], self.client_address[1], port))
                 self.request.sendall(self.data)
 
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
-    pass
 
 
 def main():
-    global Ears
-    global Ear_threads
+    ears = []
+    failed_ports = []
 
-    Ears = []
-    Ear_threads =[]
+    for port in range(1, 1001):
+        try:
+            ears.append(ThreadedTCPServer(('', port), Ear))
+        except OSError as e:
+            failed_ports.append(port)
+            print("Could not listen on port %i: %s" % (port, e))
 
-    for port in range(1,1000):
-        Ears.append(ThreadedTCPServer(('', port), Ear))
-
-    for ear in Ears:
-        Ear_threads.append(threading.Thread(target=ear.serve_forever))
-
-    for ear_thread in Ear_threads:
-        ear_thread.setDaemon(True)
+    for ear in ears:
+        ear_thread = threading.Thread(target=ear.serve_forever)
+        ear_thread.daemon = True
         ear_thread.start()
 
-    while True:
-        continue
+    print("Listening on %i ports (%i failed)." % (len(ears), len(failed_ports)))
+    if failed_ports:
+        print("Failed ports: %s" % ", ".join(str(p) for p in failed_ports))
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        # Listener threads are daemons, so they exit with the main thread.
+        print("Shutting down.")
+
 
 if __name__ == '__main__':
     main()
